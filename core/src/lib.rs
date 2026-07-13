@@ -1,10 +1,11 @@
+pub mod analysis;
+pub mod assessment;
 pub mod error;
-pub mod hash;
-pub mod magic;
-pub mod report;
-pub mod risk;
-pub mod scan;
-pub mod version;
+pub mod inspection;
+pub mod observation;
+pub mod presentation;
+pub mod target;
 
-pub use scan::{ScanRequest, ScanResult, scan};
-pub use version::{NAME, VERSION};
+pub use inspection::inspect;
+pub use observation::Observation;
+pub use target::Target;

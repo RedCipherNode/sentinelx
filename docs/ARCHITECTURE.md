@@ -2,204 +2,201 @@
 
 ## Overview
 
-SentinelX is a pre-execution threat analysis CLI designed to help users evaluate files, archives, projects, and URLs before opening, building, or executing them.
+SentinelX is a CLI-first security inspection tool that analyzes untrusted digital content before it is opened, executed, or trusted.
 
-The project focuses on static analysis and explainable findings rather than malware execution or behavioral analysis.
-
----
-
-## Goals
-
-* Analyze untrusted content without executing it.
-* Produce explainable findings instead of opaque verdicts.
-* Support multiple input types through a unified analysis pipeline.
-* Keep the architecture modular and easy to extend.
-* Remain a lightweight, portable command-line application.
+The architecture is designed around a single inspection pipeline that supports multiple target types while keeping analysis, assessment, and presentation separated.
 
 ---
 
-## Non-Goals
+## Design Principles
 
-SentinelX is **not**:
-
-* An antivirus.
-* An EDR.
-* A sandbox.
-* A runtime monitoring tool.
-* A malware removal utility.
-
----
-
-## Analysis Scope
-
-Current analysis targets include:
-
-* Files
-* Archives
-* Source code projects
-* URLs
-
-Future versions may introduce additional analyzers without changing the overall architecture.
+- Never execute untrusted content.
+- Collect evidence before making assessments.
+- Explain every assessment with supporting evidence.
+- Keep responsibilities isolated.
+- Keep dependencies one-directional.
+- Design for extensibility without changing the inspection pipeline.
 
 ---
 
-## Architecture
+## High-Level Architecture
 
-```text
-           CLI
-            │
-            ▼
-          Core
-            │
-   ┌────────┼────────┐
-   ▼        ▼        ▼
-Scanner   Analyzer  Reporter
-            │
-            ▼
-          Findings
-            │
-            ▼
-        Risk Scoring
+```mermaid
+flowchart LR
+
+    A[CLI Command]
+        --> B[Resolve Target]
+        --> C[Inspect]
+        --> D[Threat Analysis]
+        --> E[Present Results]
 ```
+
+---
+
+## Components
 
 ### CLI
 
-Responsible for:
+Responsibilities
 
-* Parsing command-line arguments.
-* Invoking the Core.
-* Displaying results.
-* Returning exit codes.
+- Parse command-line arguments.
+- Resolve user options.
+- Invoke the Core.
+- Display results.
+- Return exit codes.
 
-The CLI contains no analysis logic.
+Does not
+
+- Inspect targets.
+- Perform analysis.
+- Apply detection rules.
+- Calculate assessments.
 
 ---
 
 ### Core
 
-The Core owns every analysis capability.
+Responsibilities
 
-Responsibilities include:
+- Resolve inspection targets.
+- Select inspection capabilities.
+- Execute inspections.
+- Collect observations.
+- Perform threat analysis.
+- Generate assessments.
+- Produce structured results.
 
-* Input discovery.
-* File inspection.
-* Archive inspection.
-* Project inspection.
-* URL inspection.
-* Threat analysis.
-* Finding generation.
-* Risk scoring.
-* Report generation.
+Does not
 
-The Core must remain independent from the CLI.
+- Parse CLI arguments.
+- Print terminal output.
+- Manage user interaction.
 
 ---
 
-## Analysis Flow
+### Presentation
 
-```text
-Input
+Responsibilities
 
-↓
+- Render CLI output.
+- Export JSON.
+- Export HTML.
+- Export Markdown.
 
-Scanner
+Does not
 
-↓
+- Inspect targets.
+- Perform analysis.
+- Generate assessments.
 
-Analyzer
+---
 
-↓
+## Inspection Flow
 
-Findings
+```mermaid
+flowchart LR
 
-↓
-
-Risk Score
-
-↓
-
-Report
+    A[Target]
+        --> B[Inspection]
+        --> C[Observations]
+        --> D[Threat Analysis]
+        --> E[Assessment]
+        --> F[Presentation]
 ```
 
 Each stage has a single responsibility.
 
 ---
 
-## Findings
+## Inspection Targets
 
-Every analyzer produces one or more findings.
+The inspection pipeline is independent of target type.
 
-A finding represents an observable fact.
+Supported targets include:
 
-Examples:
+- Files
+- Archives
+- Executables
+- Documents
+- URLs
+- Projects
+- Shell Commands
+- PowerShell Commands
 
-* Double file extension.
-* Executable disguised as PDF.
-* Suspicious PowerShell command.
-* Git hook detected.
-* NPM postinstall script.
-* Embedded executable.
-
-Findings should contain evidence rather than assumptions.
-
----
-
-## Risk Assessment
-
-Risk is derived from accumulated findings.
-
-SentinelX does not classify content solely from a single indicator whenever possible.
-
-The scoring implementation is documented separately.
+Additional targets may be introduced without changing the overall architecture.
 
 ---
 
-## Reports
+## Threat Analysis
 
-The reporting layer transforms analysis results into user-friendly output.
+Threat analysis evaluates collected observations to identify suspicious behaviors, techniques, or attack patterns.
 
-Supported formats may include:
+Examples include:
 
-* Terminal
-* JSON
-* HTML
-* Markdown
+- Credential harvesting
+- Cookie theft
+- Session hijacking
+- Phishing
+- Remote code execution
+- Persistence
+- Obfuscation
+- Downloader behavior
+- Supply-chain attacks
 
-Reports never perform analysis.
+Threat analysis should always be supported by observable evidence.
 
 ---
 
-## Design Principles
+## Assessment
 
-### Never execute untrusted content
+Assessments summarize the overall security posture of the inspected target.
 
-SentinelX performs static inspection only.
+Assessments should explain:
 
-Untrusted files, scripts, projects, and archives must never be executed during analysis.
+- What was detected.
+- Why it is suspicious.
+- What data or resources are affected.
+- What the potential impact is.
 
-### Explain every result
+Assessments must never exist without supporting observations.
 
-Every warning should answer:
+---
 
-* What was detected?
-* Why is it suspicious?
-* Where was it found?
+## Presentation Flow
 
-### Separate facts from conclusions
+```mermaid
+flowchart LR
 
-Evidence should be collected first.
-
-Risk evaluation is derived from the collected evidence.
-
-### Keep dependencies directional
-
+    A[Structured Result]
+        --> B[CLI]
+        --> C[JSON]
+        --> D[HTML]
+        --> E[Markdown]
 ```
+
+Presentation formats never perform inspection or threat analysis.
+
+---
+
+## Dependency Rules
+
+```text
 CLI
- ↓
+    │
+    ▼
 Core
+    │
+    ▼
+Presentation
 ```
 
-The Core must not depend on the CLI.
+Rules
+
+- Dependencies flow in one direction.
+- Lower layers never depend on upper layers.
+- CLI never performs inspection.
+- Presentation never performs analysis.
+- Core remains independent from presentation.
 
 ---
 
@@ -217,21 +214,4 @@ sentinelx/
 └── LICENSE
 ```
 
-The internal organization of `core` should evolve only when real complexity appears, not in anticipation of future features.
-
----
-
-## Future Extensions
-
-The architecture allows new analyzers to be added without changing the analysis pipeline.
-
-Examples include:
-
-* PE analysis
-* Office documents
-* PDF inspection
-* Image inspection
-* Steganography heuristics
-* Threat intelligence providers
-
-These extensions should integrate through the existing analysis flow rather than introducing new execution paths.
+Internal organization of `core` may evolve as complexity increases without changing the architecture described in this document.
