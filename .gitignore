@@ -1,0 +1,22 @@
+# Rust
+/target/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.*
+
+# Temporary
+*.tmp
+*.temp
