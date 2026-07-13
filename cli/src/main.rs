@@ -1,4 +1,7 @@
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+
+use stx_core::{ScanRequest, VERSION, scan};
 
 #[derive(Parser)]
 #[command(name = "stx")]
@@ -10,9 +13,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Scan,
+    Scan { path: PathBuf },
+
     Url,
+
     Hash,
+
     Version,
 }
 
@@ -20,12 +26,12 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Commands::Version) => {
-            println!("SentinelX {}", stx_core::version::VERSION);
-        }
+        Some(Commands::Scan { path }) => {
+            let request = ScanRequest { path };
 
-        Some(Commands::Scan) => {
-            println!("Scan is not implemented yet.");
+            let result = scan(request);
+
+            println!("{:#?}", result);
         }
 
         Some(Commands::Url) => {
@@ -36,8 +42,12 @@ fn main() {
             println!("Hash analysis is not implemented yet.");
         }
 
+        Some(Commands::Version) => {
+            println!("SentinelX {VERSION}");
+        }
+
         None => {
-            println!("SentinelX {}", stx_core::version::VERSION);
+            println!("SentinelX {VERSION}");
             println!();
             println!("Pre-execution threat analysis CLI.");
             println!();

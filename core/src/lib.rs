@@ -5,3 +5,6 @@ pub mod report;
 pub mod risk;
 pub mod scan;
 pub mod version;
+
+pub use scan::{ScanRequest, ScanResult, scan};
+pub use version::{NAME, VERSION};
