@@ -1,57 +1,76 @@
-use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::env;
 
-use stx_core::{ScanRequest, VERSION, scan};
-
-#[derive(Parser)]
-#[command(name = "stx")]
-#[command(about = "Pre-execution threat analysis CLI.")]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    Scan { path: PathBuf },
-
-    Url,
-
-    Hash,
-
-    Version,
-}
+use stx_core::{Target, inspect};
 
 fn main() {
-    let cli = Cli::parse();
+    let mut args = env::args().skip(1);
 
-    match cli.command {
-        Some(Commands::Scan { path }) => {
-            let request = ScanRequest { path };
+    let Some(command) = args.next() else {
+        print_help();
+        return;
+    };
 
-            let result = scan(request);
+    match command.as_str() {
+        "inspect" => {
+            let Some(input) = args.next() else {
+                eprintln!("error: missing target\n");
+                print_help();
+                std::process::exit(1);
+            };
 
-            println!("{:#?}", result);
-        }
+            let target = Target::resolve(&input);
 
-        Some(Commands::Url) => {
-            println!("URL analysis is not implemented yet.");
-        }
+            let assessment = inspect(target);
 
-        Some(Commands::Hash) => {
-            println!("Hash analysis is not implemented yet.");
-        }
-
-        Some(Commands::Version) => {
-            println!("SentinelX {VERSION}");
-        }
-
-        None => {
-            println!("SentinelX {VERSION}");
+            println!("SentinelX");
+            println!("==========");
             println!();
-            println!("Pre-execution threat analysis CLI.");
-            println!();
-            println!("Run 'stx --help' for usage.");
+            println!("{}", assessment.summary);
+
+            if !assessment.observations.is_empty() {
+                println!();
+
+                println!("Observations");
+
+                for observation in &assessment.observations {
+                    println!("- {}: {}", observation.title, observation.value,);
+                }
+            }
+        }
+
+        "-h" | "--help" | "help" => {
+            print_help();
+        }
+
+        "-V" | "--version" | "version" => {
+            println!("SentinelX v0.1.0");
+        }
+
+        _ => {
+            eprintln!("error: unknown command '{}'\n", command);
+            print_help();
+            std::process::exit(1);
         }
     }
+}
+
+fn print_help() {
+    println!(
+        r#"SentinelX
+
+USAGE:
+    stx <COMMAND> <TARGET>
+
+COMMANDS:
+    inspect     Inspect a target
+    version     Show version
+    help        Show this help
+
+EXAMPLES:
+    stx inspect malware.exe
+    stx inspect archive.zip
+    stx inspect https://example.com
+    stx inspect ./project
+"#
+    );
 }
