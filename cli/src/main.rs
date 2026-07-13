@@ -22,19 +22,17 @@ fn main() {
 
             let assessment = inspect(target);
 
-            println!("SentinelX");
-            println!("==========");
             println!();
+            println!("Summary");
+            println!("-------");
             println!("{}", assessment.summary);
 
-            if !assessment.observations.is_empty() {
-                println!();
+            println!();
+            println!("Observations");
+            println!("------------");
 
-                println!("Observations");
-
-                for observation in &assessment.observations {
-                    println!("- {}: {}", observation.title, observation.value,);
-                }
+            for observation in &assessment.observations {
+                println!("{:<15} {}", observation.title, observation.value);
             }
         }
 
