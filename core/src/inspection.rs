@@ -6,11 +6,14 @@
 //! Inspection never performs threat assessment.
 //! Inspection never generates user-facing reports.
 
+use crate::analysis::analyze;
 use crate::assessment::Assessment;
 use crate::file_type::FileType;
 use crate::observation::Observation;
-use crate::severity::Severity;
 use crate::target::Target;
+use md5;
+use sha1::{Digest, Sha1};
+use sha2::Sha256;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
@@ -32,9 +35,12 @@ pub fn inspect(target: Target) -> Assessment {
         }
     };
 
+    let findings = analyze(&observations);
+
     Assessment {
         summary: String::from("Inspection completed."),
         observations,
+        findings,
     }
 }
 
@@ -59,9 +65,9 @@ fn inspect_file(path: &Path) -> Vec<Observation> {
 
     if let Some(file_type) = detect_file_type(path) {
         observations.push(Observation::new("Detected Type", file_type.display()));
-
-        inspect_extension_mismatch(path, file_type, &mut observations);
     }
+
+    inspect_hashes(path, &mut observations);
 
     observations
 }
@@ -101,35 +107,39 @@ fn detect_file_type(path: &Path) -> Option<FileType> {
     None
 }
 
-fn inspect_extension_mismatch(
-    path: &Path,
-    file_type: FileType,
-    observations: &mut Vec<Observation>,
-) {
-    let expected = file_type.expected_extension();
-
-    let Some(extension) = path.extension() else {
+fn inspect_hashes(path: &Path, observations: &mut Vec<Observation>) {
+    let Ok(bytes) = fs::read(path) else {
         return;
     };
 
-    let actual = extension.to_string_lossy().to_ascii_lowercase();
+    //
+    // MD5
+    //
 
-    let matches = match expected {
-        "jpg" => actual == "jpg" || actual == "jpeg",
-        _ => actual == expected,
-    };
+    let md5 = md5::compute(&bytes);
 
-    if !matches {
-        observations.push(Observation::with_severity(
-            "Extension Mismatch",
-            "Yes",
-            Severity::Warning,
-            Some(format!(
-                "Expected extension .{} based on detected {}, but found .{}.",
-                expected,
-                file_type.display(),
-                actual,
-            )),
-        ));
-    }
+    observations.push(Observation::new("MD5", format!("{:x}", md5)));
+
+    //
+    // SHA-1
+    //
+
+    let mut sha1 = Sha1::new();
+
+    sha1.update(&bytes);
+
+    observations.push(Observation::new("SHA-1", format!("{:x}", sha1.finalize())));
+
+    //
+    // SHA-256
+    //
+
+    let mut sha256 = Sha256::new();
+
+    sha256.update(&bytes);
+
+    observations.push(Observation::new(
+        "SHA-256",
+        format!("{:x}", sha256.finalize()),
+    ));
 }

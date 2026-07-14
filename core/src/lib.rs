@@ -2,6 +2,7 @@ pub mod analysis;
 pub mod assessment;
 pub mod error;
 pub mod file_type;
+pub mod finding;
 pub mod inspection;
 pub mod observation;
 pub mod presentation;
@@ -10,6 +11,7 @@ pub mod target;
 
 pub use assessment::Assessment;
 pub use file_type::FileType;
+pub use finding::Finding;
 pub use inspection::inspect;
 pub use observation::Observation;
 pub use severity::Severity;

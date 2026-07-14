@@ -63,6 +63,24 @@ fn print_assessment(assessment: &Assessment) {
             println!("           {}", description);
         }
     }
+    println!();
+    println!("Findings");
+    println!("--------");
+    if assessment.findings.is_empty() {
+        println!("No findings.");
+    }
+    for finding in &assessment.findings {
+        println!(
+            "[{:<8}] {:<24} {}",
+            finding.severity.display(),
+            finding.title,
+            finding.value,
+        );
+
+        if let Some(description) = &finding.description {
+            println!("           {}", description);
+        }
+    }
 }
 
 fn print_help() {
