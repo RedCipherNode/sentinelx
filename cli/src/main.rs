@@ -1,6 +1,6 @@
 use std::env;
 
-use stx_core::{Target, inspect};
+use stx_core::{Assessment, Target, inspect};
 
 fn main() {
     let mut args = env::args().skip(1);
@@ -22,32 +22,45 @@ fn main() {
 
             let assessment = inspect(target);
 
-            println!();
-            println!("Summary");
-            println!("-------");
-            println!("{}", assessment.summary);
-
-            println!();
-            println!("Observations");
-            println!("------------");
-
-            for observation in &assessment.observations {
-                println!("{:<15} {}", observation.title, observation.value);
-            }
+            print_assessment(&assessment);
         }
 
-        "-h" | "--help" | "help" => {
+        "help" | "-h" | "--help" => {
             print_help();
         }
 
-        "-V" | "--version" | "version" => {
-            println!("SentinelX v0.1.0");
+        "version" | "-V" | "--version" => {
+            print_version();
         }
 
         _ => {
             eprintln!("error: unknown command '{}'\n", command);
             print_help();
             std::process::exit(1);
+        }
+    }
+}
+
+fn print_assessment(assessment: &Assessment) {
+    println!();
+    println!("Summary");
+    println!("-------");
+    println!("{}", assessment.summary);
+
+    println!();
+    println!("Observations");
+    println!("------------");
+
+    for observation in &assessment.observations {
+        println!(
+            "[{:<8}] {:<24} {}",
+            observation.severity.display(),
+            observation.title,
+            observation.value,
+        );
+
+        if let Some(description) = &observation.description {
+            println!("           {}", description);
         }
     }
 }
@@ -60,9 +73,9 @@ USAGE:
     stx <COMMAND> <TARGET>
 
 COMMANDS:
-    inspect     Inspect a target
-    version     Show version
-    help        Show this help
+    inspect     Inspect a file, directory, URL, or command
+    version     Show version information
+    help        Show this help message
 
 EXAMPLES:
     stx inspect malware.exe
@@ -71,4 +84,8 @@ EXAMPLES:
     stx inspect ./project
 "#
     );
+}
+
+fn print_version() {
+    println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"),);
 }

@@ -7,7 +7,9 @@
 //! Inspection never generates user-facing reports.
 
 use crate::assessment::Assessment;
+use crate::file_type::FileType;
 use crate::observation::Observation;
+use crate::severity::Severity;
 use crate::target::Target;
 use std::fs::{self, File};
 use std::io::Read;
@@ -56,21 +58,15 @@ fn inspect_file(path: &Path) -> Vec<Observation> {
     }
 
     if let Some(file_type) = detect_file_type(path) {
-        observations.push(Observation::new("Detected Type", file_type));
+        observations.push(Observation::new("Detected Type", file_type.display()));
 
-        if !extension_matches(path, file_type) {
-            observations.push(Observation::with_description(
-                "Extension Mismatch",
-                "Yes",
-                "The file extension does not match the detected file format.",
-            ));
-        }
+        inspect_extension_mismatch(path, file_type, &mut observations);
     }
 
     observations
 }
 
-fn detect_file_type(path: &Path) -> Option<&'static str> {
+fn detect_file_type(path: &Path) -> Option<FileType> {
     let mut file = File::open(path).ok()?;
 
     let mut buffer = [0u8; 16];
@@ -79,46 +75,61 @@ fn detect_file_type(path: &Path) -> Option<&'static str> {
     let data = &buffer[..bytes_read];
 
     if data.starts_with(b"MZ") {
-        return Some("PE Executable");
+        return Some(FileType::PE);
     }
 
     if data.starts_with(b"%PDF") {
-        return Some("PDF Document");
+        return Some(FileType::PDF);
     }
 
     if data.starts_with(b"PK\x03\x04") {
-        return Some("ZIP Archive");
+        return Some(FileType::ZIP);
     }
 
     if data.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Some("PNG Image");
+        return Some(FileType::PNG);
     }
 
     if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        return Some("JPEG Image");
+        return Some(FileType::JPEG);
     }
 
     if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
-        return Some("GIF Image");
+        return Some(FileType::GIF);
     }
 
     None
 }
 
-fn extension_matches(path: &Path, detected_type: &str) -> bool {
-    let Some(ext) = path.extension() else {
-        return true;
+fn inspect_extension_mismatch(
+    path: &Path,
+    file_type: FileType,
+    observations: &mut Vec<Observation>,
+) {
+    let expected = file_type.expected_extension();
+
+    let Some(extension) = path.extension() else {
+        return;
     };
 
-    let ext = ext.to_string_lossy().to_ascii_lowercase();
+    let actual = extension.to_string_lossy().to_ascii_lowercase();
 
-    match detected_type {
-        "PE Executable" => ext == "exe",
-        "PDF Document" => ext == "pdf",
-        "ZIP Archive" => ext == "zip",
-        "PNG Image" => ext == "png",
-        "JPEG Image" => ext == "jpg" || ext == "jpeg",
-        "GIF Image" => ext == "gif",
-        _ => true,
+    let matches = match expected {
+        "jpg" => actual == "jpg" || actual == "jpeg",
+        _ => actual == expected,
+    };
+
+    if !matches {
+        observations.push(Observation::with_severity(
+            "Extension Mismatch",
+            "Yes",
+            Severity::Warning,
+            Some(format!(
+                "Expected extension .{} based on detected {}, but found .{}.",
+                expected,
+                file_type.display(),
+                actual,
+            )),
+        ));
     }
 }
