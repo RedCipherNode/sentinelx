@@ -154,6 +154,16 @@ fn inspect_hashes(path: &Path, observations: &mut Vec<Observation>) {
 // PE (Portable Executable)
 //===========================================
 
+#[allow(dead_code)]
+struct PeSection {
+    name: String,
+    virtual_size: u32,
+    virtual_address: u32,
+    raw_size: u32,
+    raw_offset: u32,
+    characteristics: u32,
+}
+
 fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
     let Ok(bytes) = fs::read(path) else {
         return;
@@ -528,6 +538,7 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
         "PE Section Table Offset",
         format!("0x{:X}", section_table_offset),
     ));
+    let mut pe_sections = Vec::new();
 
     for index in 0..sections {
         let offset = section_table_offset + index as usize * 40;
@@ -580,6 +591,15 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
         let Some(characteristics) = read_u32(&bytes, offset + 36) else {
             continue;
         };
+
+        pe_sections.push(PeSection {
+            name: section_name.clone(),
+            virtual_size,
+            virtual_address,
+            raw_size: size_of_raw_data,
+            raw_offset: pointer_to_raw_data,
+            characteristics,
+        });
 
         observations.push(Observation::new(
             format!("Section[{}] Name", index + 1),
@@ -699,10 +719,99 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
 
         let name = DATA_DIRECTORY_NAMES[index as usize];
 
-        observations.push(Observation::new(
-            format!("PE {} Directory RVA", name),
-            format!("0x{:08X}", rva),
-        ));
+        if name == "Import" {
+            if let Some(import_offset) = rva_to_file_offset(rva, &pe_sections) {
+                observations.push(Observation::new(
+                    "PE Import Directory Offset",
+                    format!("0x{:08X}", import_offset),
+                ));
+
+                let mut descriptor_offset = import_offset;
+
+                loop {
+                    let Some(original_first_thunk) = read_u32(&bytes, descriptor_offset) else {
+                        break;
+                    };
+
+                    let Some(time_date_stamp) = read_u32(&bytes, descriptor_offset + 4) else {
+                        break;
+                    };
+
+                    let Some(forwarder_chain) = read_u32(&bytes, descriptor_offset + 8) else {
+                        break;
+                    };
+
+                    let Some(name_rva) = read_u32(&bytes, descriptor_offset + 12) else {
+                        break;
+                    };
+
+                    let Some(first_thunk) = read_u32(&bytes, descriptor_offset + 16) else {
+                        break;
+                    };
+
+                    // Null descriptor = selesai
+                    if original_first_thunk == 0
+                        && time_date_stamp == 0
+                        && forwarder_chain == 0
+                        && name_rva == 0
+                        && first_thunk == 0
+                    {
+                        break;
+                    }
+
+                    if let Some(name_offset) = rva_to_file_offset(name_rva, &pe_sections) {
+                        if let Some(dll_name) = read_c_string(&bytes, name_offset) {
+                            observations.push(Observation::new("PE Import DLL", dll_name));
+                        }
+                    }
+
+                    observations.push(Observation::new(
+                        "PE Import Original First Thunk",
+                        format!("0x{:08X}", original_first_thunk),
+                    ));
+
+                    observations.push(Observation::new(
+                        "PE Import First Thunk",
+                        format!("0x{:08X}", first_thunk),
+                    ));
+
+                    if let Some(thunk_offset) =
+                        rva_to_file_offset(original_first_thunk, &pe_sections)
+                    {
+                        let mut current_thunk = thunk_offset;
+
+                        loop {
+                            let Some(thunk_data) = read_u64(&bytes, current_thunk) else {
+                                break;
+                            };
+
+                            if thunk_data == 0 {
+                                break;
+                            }
+
+                            let hint_name_rva = thunk_data as u32;
+
+                            if let Some(hint_name_offset) =
+                                rva_to_file_offset(hint_name_rva, &pe_sections)
+                            {
+                                if let Some(function_name) =
+                                    read_c_string(&bytes, hint_name_offset + 2)
+                                {
+                                    observations.push(Observation::new(
+                                        "PE Import Function",
+                                        function_name,
+                                    ));
+                                }
+                            }
+
+                            current_thunk += 8;
+                        }
+                    }
+
+                    descriptor_offset += 20;
+                }
+            }
+        }
 
         observations.push(Observation::new(
             format!("PE {} Directory Size", name),
@@ -711,10 +820,11 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
     }
 }
 
+//
 //==============================
-// Binary Reader Helpers
+// Helpers
 //===========================
-
+//
 fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
     if offset + 2 > bytes.len() {
         return None;
@@ -751,4 +861,34 @@ fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
         bytes[offset + 6],
         bytes[offset + 7],
     ]))
+}
+
+fn rva_to_file_offset(rva: u32, sections: &[PeSection]) -> Option<usize> {
+    for section in sections {
+        let section_start = section.virtual_address;
+        let section_end = section.virtual_address + section.virtual_size;
+
+        if rva >= section_start && rva < section_end {
+            let section_offset = rva - section.virtual_address;
+            let file_offset = section.raw_offset + section_offset;
+
+            return Some(file_offset as usize);
+        }
+    }
+
+    None
+}
+
+fn read_c_string(bytes: &[u8], offset: usize) -> Option<String> {
+    if offset >= bytes.len() {
+        return None;
+    }
+
+    let mut end = offset;
+
+    while end < bytes.len() && bytes[end] != 0 {
+        end += 1;
+    }
+
+    Some(String::from_utf8_lossy(&bytes[offset..end]).to_string())
 }
