@@ -69,6 +69,8 @@ fn inspect_file(path: &Path) -> Vec<Observation> {
 
     inspect_hashes(path, &mut observations);
 
+    inspect_pe(path, &mut observations);
+
     observations
 }
 
@@ -142,4 +144,61 @@ fn inspect_hashes(path: &Path, observations: &mut Vec<Observation>) {
         "SHA-256",
         format!("{:x}", sha256.finalize()),
     ));
+}
+
+fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
+    let Ok(bytes) = fs::read(path) else {
+        return;
+    };
+    if bytes.len() < 0x40 {
+        return;
+    }
+    if !bytes.starts_with(b"MZ") {
+        return;
+    }
+
+    let pe_offset =
+        u32::from_le_bytes([bytes[0x3C], bytes[0x3D], bytes[0x3E], bytes[0x3F]]) as usize;
+
+    if pe_offset + 24 > bytes.len() {
+        return;
+    }
+
+    if &bytes[pe_offset..pe_offset + 4] != b"PE\0\0" {
+        return;
+    }
+
+    let machine_code = u16::from_le_bytes([bytes[pe_offset + 4], bytes[pe_offset + 5]]);
+
+    let machine = match machine_code {
+        0x014c => "Intel 386 (0x014C)",
+        0x8664 => "AMD64 (0x8664)",
+        0xAA64 => "ARM64 (0xAA64)",
+        _ => "Unknown",
+    };
+
+    let sections = u16::from_le_bytes([bytes[pe_offset + 6], bytes[pe_offset + 7]]);
+
+    let timestamp = u32::from_le_bytes([
+        bytes[pe_offset + 8],
+        bytes[pe_offset + 9],
+        bytes[pe_offset + 10],
+        bytes[pe_offset + 11],
+    ]);
+    observations.push(Observation::new("PE Machine", machine));
+    observations.push(Observation::new("PE Sections", sections.to_string()));
+    observations.push(Observation::new(
+        "PE Timestamp",
+        format_pe_timestamp(timestamp),
+    ));
+}
+
+use chrono::{DateTime, Utc};
+
+fn format_pe_timestamp(timestamp: u32) -> String {
+    let Some(datetime) = DateTime::<Utc>::from_timestamp(timestamp as i64, 0) else {
+        return String::from("Invalid");
+    };
+
+    datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string()
 }
