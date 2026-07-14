@@ -201,6 +201,10 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
         return;
     };
 
+    let Some(optional_header_size) = read_u16(&bytes, pe_offset + 20) else {
+        return;
+    };
+
     // Observation COFF Header
 
     observations.push(Observation::new("PE Machine", machine));
@@ -218,6 +222,11 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
 
         datetime.format("%Y-%m-%d %H:%M:%S UTC").to_string()
     }
+
+    observations.push(Observation::new(
+        "PE Optional Header Size",
+        format!("{} bytes", optional_header_size),
+    ));
 
     //
     // ========================================================
@@ -342,47 +351,11 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
         return;
     };
 
-    for offset in (64..=80).step_by(2) {
-        let value = read_u16(&bytes, optional_header_offset + offset).unwrap_or(0);
-
-        observations.push(Observation::new(
-            format!("OH +{offset}"),
-            format!("0x{:04X}", value),
-        ));
-    }
-
-    //
-    // Observation
-    //
-
     observations.push(Observation::new(
         "PE Checksum",
         format!("0x{:08X}", checksum),
     ));
 
-    observations.push(Observation::new(
-        "OH +68",
-        format!(
-            "0x{:04X}",
-            read_u16(&bytes, optional_header_offset + 68).unwrap_or(0)
-        ),
-    ));
-
-    observations.push(Observation::new(
-        "OH +70",
-        format!(
-            "0x{:04X}",
-            read_u16(&bytes, optional_header_offset + 70).unwrap_or(0)
-        ),
-    ));
-
-    observations.push(Observation::new(
-        "OH +72",
-        format!(
-            "0x{:04X}",
-            read_u16(&bytes, optional_header_offset + 72).unwrap_or(0)
-        ),
-    ));
     //
     // --------------------------------------------------------
     // Execution
@@ -542,6 +515,200 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
             "Disabled"
         },
     ));
+
+    //
+    // ========================================================
+    // Section Table
+    // ========================================================
+    //
+
+    let section_table_offset = optional_header_offset + optional_header_size as usize;
+
+    observations.push(Observation::new(
+        "PE Section Table Offset",
+        format!("0x{:X}", section_table_offset),
+    ));
+
+    for index in 0..sections {
+        let offset = section_table_offset + index as usize * 40;
+
+        if offset + 40 > bytes.len() {
+            break;
+        }
+
+        // Name
+        let name_bytes = &bytes[offset..offset + 8];
+
+        let section_name = String::from_utf8_lossy(name_bytes)
+            .trim_end_matches('\0')
+            .to_string();
+
+        // IMAGE_SECTION_HEADER
+
+        let Some(virtual_size) = read_u32(&bytes, offset + 8) else {
+            continue;
+        };
+
+        let Some(virtual_address) = read_u32(&bytes, offset + 12) else {
+            continue;
+        };
+
+        let Some(size_of_raw_data) = read_u32(&bytes, offset + 16) else {
+            continue;
+        };
+
+        let Some(pointer_to_raw_data) = read_u32(&bytes, offset + 20) else {
+            continue;
+        };
+
+        let Some(pointer_to_relocations) = read_u32(&bytes, offset + 24) else {
+            continue;
+        };
+
+        let Some(pointer_to_linenumbers) = read_u32(&bytes, offset + 28) else {
+            continue;
+        };
+
+        let Some(number_of_relocations) = read_u16(&bytes, offset + 32) else {
+            continue;
+        };
+
+        let Some(number_of_linenumbers) = read_u16(&bytes, offset + 34) else {
+            continue;
+        };
+
+        let Some(characteristics) = read_u32(&bytes, offset + 36) else {
+            continue;
+        };
+
+        observations.push(Observation::new(
+            format!("Section[{}] Name", index + 1),
+            section_name,
+        ));
+
+        observations.push(Observation::new(
+            format!("Section[{}] Virtual Size", index + 1),
+            format!("0x{:08X}", virtual_size),
+        ));
+
+        observations.push(Observation::new(
+            format!("Section[{}] Virtual Address", index + 1),
+            format!("0x{:08X}", virtual_address),
+        ));
+
+        observations.push(Observation::new(
+            format!("Section[{}] Raw Size", index + 1),
+            format!("0x{:08X}", size_of_raw_data),
+        ));
+
+        observations.push(Observation::new(
+            format!("Section[{}] Raw Offset", index + 1),
+            format!("0x{:08X}", pointer_to_raw_data),
+        ));
+
+        observations.push(Observation::new(
+            format!("Section[{}] Relocation Offset", index + 1),
+            format!("0x{:08X}", pointer_to_relocations),
+        ));
+
+        observations.push(Observation::new(
+            format!("Section[{}] Line Number Offset", index + 1),
+            format!("0x{:08X}", pointer_to_linenumbers),
+        ));
+
+        observations.push(Observation::new(
+            format!("Section[{}] Relocations", index + 1),
+            number_of_relocations.to_string(),
+        ));
+
+        observations.push(Observation::new(
+            format!("Section[{}] Line Numbers", index + 1),
+            number_of_linenumbers.to_string(),
+        ));
+
+        observations.push(Observation::new(
+            format!("Section[{}] Characteristics", index + 1),
+            format!("0x{:08X}", characteristics),
+        ));
+    }
+
+    //
+    // -----------------------------------------------
+    // Data Directories
+    // ------------------------------------------------
+    //
+
+    let data_directory_offset = match magic {
+        // PE32
+        0x10B => optional_header_offset + 96,
+
+        // PE32+
+        0x20B => optional_header_offset + 112,
+
+        _ => return,
+    };
+
+    let number_of_directories = match magic {
+        0x10B => read_u32(&bytes, optional_header_offset + 92),
+        0x20B => read_u32(&bytes, optional_header_offset + 108),
+        _ => None,
+    };
+
+    let Some(number_of_directories) = number_of_directories else {
+        return;
+    };
+
+    observations.push(Observation::new(
+        "PE Data Directories",
+        number_of_directories.to_string(),
+    ));
+
+    const DATA_DIRECTORY_NAMES: [&str; 16] = [
+        "Export",
+        "Import",
+        "Resource",
+        "Exception",
+        "Certificate",
+        "Base Relocation",
+        "Debug",
+        "Architecture",
+        "Global Ptr",
+        "TLS",
+        "Load Config",
+        "Bound Import",
+        "IAT",
+        "Delay Import",
+        "CLR",
+        "Reserved",
+    ];
+
+    for index in 0..number_of_directories.min(16) {
+        let offset = data_directory_offset + index as usize * 8;
+
+        if offset + 8 > bytes.len() {
+            break;
+        }
+
+        let Some(rva) = read_u32(&bytes, offset) else {
+            continue;
+        };
+
+        let Some(size) = read_u32(&bytes, offset + 4) else {
+            continue;
+        };
+
+        let name = DATA_DIRECTORY_NAMES[index as usize];
+
+        observations.push(Observation::new(
+            format!("PE {} Directory RVA", name),
+            format!("0x{:08X}", rva),
+        ));
+
+        observations.push(Observation::new(
+            format!("PE {} Directory Size", name),
+            format!("0x{:08X}", size),
+        ));
+    }
 }
 
 //==============================
