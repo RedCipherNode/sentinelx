@@ -203,7 +203,7 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
         _ => "Unknown",
     };
 
-    let Some(sections) = read_u16(&bytes, pe_offset + 6) else {
+    let Some(number_of_sections) = read_u16(&bytes, pe_offset + 6) else {
         return;
     };
 
@@ -235,7 +235,7 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
 
     observations.push(Observation::new(
         "PE Optional Header Size",
-        format!("{} bytes", optional_header_size),
+        format!("{optional_header_size} bytes"),
     ));
 
     //
@@ -652,6 +652,27 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
         ));
     }
 
+    //------------------------------------------------------
+    // Overlay
+    // ----------------------------------------------------
+
+    let last_section_end = pe_sections
+        .iter()
+        .map(|section| section.raw_offset as usize + section.raw_size as usize)
+        .max()
+        .unwrap_or(0);
+
+    if bytes.len() > last_section_end {
+        observations.push(Observation::new("PE Overlay", "Present"));
+
+        observations.push(Observation::new(
+            "PE Overlay Size",
+            format!("{} bytes", bytes.len() - last_section_end),
+        ));
+    } else {
+        observations.push(Observation::new("PE Overlay", "Not Found"));
+    }
+
     //
     // -----------------------------------------------
     // Data Directories
@@ -719,104 +740,374 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
 
         let name = DATA_DIRECTORY_NAMES[index as usize];
 
-        if name == "Import" {
-            if let Some(import_offset) = rva_to_file_offset(rva, &pe_sections) {
-                observations.push(Observation::new(
-                    "PE Import Directory Offset",
-                    format!("0x{:08X}", import_offset),
-                ));
+        // --------------------------------------------------------
+        // CLR
+        // --------------------------------------------------------
 
-                let mut descriptor_offset = import_offset;
+        if name == "CLR" {
+            observations.push(Observation::new(
+                "PE CLR",
+                if size > 0 { "Present" } else { "Not Found" },
+            ));
+        }
 
-                loop {
-                    let Some(original_first_thunk) = read_u32(&bytes, descriptor_offset) else {
-                        break;
+        // --------------------------------------------------------
+        // Certificate
+        // --------------------------------------------------------
+
+        if name == "Certificate" {
+            observations.push(Observation::new(
+                "PE Certificate",
+                if size > 0 { "Present" } else { "Not Found" },
+            ));
+        }
+
+        // --------------------------------------------------------
+        // Resource
+        // -------------------------------------------------------
+
+        if name == "Resource" {
+            observations.push(Observation::new(
+                "PE Resources",
+                if size > 0 { "Present" } else { "Not Found" },
+            ));
+
+            // Root Resource Directory (Level 1)
+
+            if size > 0 {
+                if let Some(resource_offset) = rva_to_file_offset(rva, &pe_sections) {
+                    let Some(named_entries) = read_u16(&bytes, resource_offset + 12) else {
+                        continue;
                     };
 
-                    let Some(time_date_stamp) = read_u32(&bytes, descriptor_offset + 4) else {
-                        break;
+                    let Some(id_entries) = read_u16(&bytes, resource_offset + 14) else {
+                        continue;
                     };
 
-                    let Some(forwarder_chain) = read_u32(&bytes, descriptor_offset + 8) else {
-                        break;
-                    };
+                    observations.push(Observation::new(
+                        "PE Resource Named Entries",
+                        named_entries.to_string(),
+                    ));
 
-                    let Some(name_rva) = read_u32(&bytes, descriptor_offset + 12) else {
-                        break;
-                    };
+                    observations.push(Observation::new(
+                        "PE Resource ID Entries",
+                        id_entries.to_string(),
+                    ));
 
-                    let Some(first_thunk) = read_u32(&bytes, descriptor_offset + 16) else {
-                        break;
-                    };
+                    // Resource Entries
 
-                    // Null descriptor = selesai
-                    if original_first_thunk == 0
-                        && time_date_stamp == 0
-                        && forwarder_chain == 0
-                        && name_rva == 0
-                        && first_thunk == 0
-                    {
-                        break;
-                    }
+                    let total_entries = named_entries + id_entries;
 
-                    if let Some(name_offset) = rva_to_file_offset(name_rva, &pe_sections) {
-                        if let Some(dll_name) = read_c_string(&bytes, name_offset) {
-                            observations.push(Observation::new("PE Import DLL", dll_name));
+                    // Level 1 Entries (Resource Types)
+                    for index in 0..total_entries {
+                        let entry_offset = resource_offset + 16 + index as usize * 8;
+
+                        let Some(name) = read_u32(&bytes, entry_offset) else {
+                            continue;
+                        };
+
+                        let Some(offset_to_data) = read_u32(&bytes, entry_offset + 4) else {
+                            continue;
+                        };
+
+                        if (name & 0x8000_0000) != 0 {
+                            observations
+                                .push(Observation::new("PE Resource Type", "Named Resource"));
+                            continue;
                         }
-                    }
 
-                    observations.push(Observation::new(
-                        "PE Import Original First Thunk",
-                        format!("0x{:08X}", original_first_thunk),
-                    ));
+                        let resource_id = (name & 0xFFFF) as u16;
 
-                    observations.push(Observation::new(
-                        "PE Import First Thunk",
-                        format!("0x{:08X}", first_thunk),
-                    ));
+                        observations.push(Observation::new(
+                            "PE Resource Type",
+                            resource_type_name(resource_id),
+                        ));
 
-                    if let Some(thunk_offset) =
-                        rva_to_file_offset(original_first_thunk, &pe_sections)
-                    {
-                        let mut current_thunk = thunk_offset;
+                        let is_directory = (offset_to_data & 0x8000_0000) != 0;
 
-                        loop {
-                            let Some(thunk_data) = read_u64(&bytes, current_thunk) else {
-                                break;
+                        let child_offset = (offset_to_data & 0x7FFF_FFFF) as usize;
+
+                        if is_directory {
+                            observations.push(Observation::new("PE Resource Child", "Directory"));
+
+                            let directory_offset = resource_offset + child_offset;
+
+                            observations.push(Observation::new(
+                                "PE Resource Directory Offset",
+                                format!("0x{:08X}", directory_offset),
+                            ));
+
+                            let Some(child_named_entries) = read_u16(&bytes, directory_offset + 12)
+                            else {
+                                continue;
                             };
 
-                            if thunk_data == 0 {
-                                break;
-                            }
+                            let Some(child_id_entries) = read_u16(&bytes, directory_offset + 14)
+                            else {
+                                continue;
+                            };
 
-                            let hint_name_rva = thunk_data as u32;
+                            let child_total_entries = child_named_entries + child_id_entries;
 
-                            if let Some(hint_name_offset) =
-                                rva_to_file_offset(hint_name_rva, &pe_sections)
-                            {
-                                if let Some(function_name) =
-                                    read_c_string(&bytes, hint_name_offset + 2)
-                                {
+                            // Level 2 Entries (Resource IDs / Names)
+                            for child_index in 0..child_total_entries {
+                                let child_entry_offset =
+                                    directory_offset + 16 + child_index as usize * 8;
+
+                                let Some(child_name) = read_u32(&bytes, child_entry_offset) else {
+                                    continue;
+                                };
+
+                                let Some(child_offset_to_data) =
+                                    read_u32(&bytes, child_entry_offset + 4)
+                                else {
+                                    continue;
+                                };
+
+                                if (child_name & 0x8000_0000) != 0 {
+                                    observations
+                                        .push(Observation::new("PE Resource Child Name", "Named"));
+                                } else {
                                     observations.push(Observation::new(
-                                        "PE Import Function",
-                                        function_name,
+                                        "PE Resource Child ID",
+                                        (child_name & 0xFFFF).to_string(),
+                                    ));
+                                }
+                                let child_is_directory = (child_offset_to_data & 0x8000_0000) != 0;
+                                let grandchild_offset =
+                                    resource_offset + (child_offset_to_data & 0x7FFF_FFFF) as usize;
+
+                                observations.push(Observation::new(
+                                    "PE Resource Grandchild",
+                                    if child_is_directory {
+                                        "Directory"
+                                    } else {
+                                        "Data"
+                                    },
+                                ));
+
+                                observations.push(Observation::new(
+                                    "PE Resource Grandchild Offset",
+                                    format!("0x{:08X}", grandchild_offset),
+                                ));
+
+                                let Some(grandchild_named_entries) =
+                                    read_u16(&bytes, grandchild_offset + 12)
+                                else {
+                                    continue;
+                                };
+
+                                let Some(grandchild_id_entries) =
+                                    read_u16(&bytes, grandchild_offset + 14)
+                                else {
+                                    continue;
+                                };
+
+                                let grandchild_total_entries =
+                                    grandchild_named_entries + grandchild_id_entries;
+                                observations.push(Observation::new(
+                                    "PE Resource Grandchild Named Entries",
+                                    grandchild_named_entries.to_string(),
+                                ));
+
+                                observations.push(Observation::new(
+                                    "PE Resource Grandchild ID Entries",
+                                    grandchild_id_entries.to_string(),
+                                ));
+
+                                // Level 3 Entries (Resource Languages)
+                                for grandchild_index in 0..grandchild_total_entries {
+                                    let grandchild_entry_offset =
+                                        grandchild_offset + 16 + grandchild_index as usize * 8;
+                                    let Some(grandchild_name) =
+                                        read_u32(&bytes, grandchild_entry_offset)
+                                    else {
+                                        continue;
+                                    };
+
+                                    observations.push(Observation::new(
+                                        "PE Resource Language ID",
+                                        (grandchild_name & 0xFFFF).to_string(),
+                                    ));
+
+                                    // --------------------------------------------------------
+                                    // Connect to IMAGE_RESOURCE_DATA_ENTRY
+                                    // --------------------------------------------------------
+
+                                    let Some(grandchild_offset_to_data) =
+                                        read_u32(&bytes, grandchild_entry_offset + 4)
+                                    else {
+                                        continue;
+                                    };
+                                    let is_directory =
+                                        (grandchild_offset_to_data & 0x8000_0000) != 0;
+
+                                    if is_directory {
+                                        continue;
+                                    }
+                                    let data_entry_offset = resource_offset
+                                        + (grandchild_offset_to_data & 0x7FFF_FFFF) as usize;
+
+                                    observations.push(Observation::new(
+                                        "PE Resource Data Entry Offset",
+                                        format!("0x{:08X}", data_entry_offset),
+                                    ));
+
+                                    let Some(offset_to_data) = read_u32(&bytes, data_entry_offset)
+                                    else {
+                                        continue;
+                                    };
+
+                                    let Some(size) = read_u32(&bytes, data_entry_offset + 4) else {
+                                        continue;
+                                    };
+
+                                    let Some(code_page) = read_u32(&bytes, data_entry_offset + 8)
+                                    else {
+                                        continue;
+                                    };
+
+                                    let Some(reserved) = read_u32(&bytes, data_entry_offset + 12)
+                                    else {
+                                        continue;
+                                    };
+
+                                    let Some(resource_file_offset) =
+                                        rva_to_file_offset(offset_to_data, &sections)
+                                    else {
+                                        continue;
+                                    };
+
+                                    observations.push(Observation::new(
+                                        "PE Resource Data RVA",
+                                        format!("0x{:08X}", offset_to_data),
+                                    ));
+
+                                    observations.push(Observation::new(
+                                        "PE Resource Data Size",
+                                        format!("0x{:08X}", size),
+                                    ));
+
+                                    observations.push(Observation::new(
+                                        "PE Resource Code Page",
+                                        code_page.to_string(),
+                                    ));
+
+                                    observations.push(Observation::new(
+                                        "PE Resource Reserved",
+                                        reserved.to_string(),
+                                    ));
+
+                                    observations.push(Observation::new(
+                                        "PE Resource File Offset",
+                                        format!("0x{:08X}", resource_file_offset),
                                     ));
                                 }
                             }
-
-                            current_thunk += 8;
                         }
                     }
-
-                    descriptor_offset += 20;
                 }
             }
-        }
 
-        observations.push(Observation::new(
-            format!("PE {} Directory Size", name),
-            format!("0x{:08X}", size),
-        ));
+            if name == "Import" {
+                if let Some(import_offset) = rva_to_file_offset(rva, &pe_sections) {
+                    observations.push(Observation::new(
+                        "PE Import Directory Offset",
+                        format!("0x{:08X}", import_offset),
+                    ));
+
+                    let mut descriptor_offset = import_offset;
+
+                    loop {
+                        let Some(original_first_thunk) = read_u32(&bytes, descriptor_offset) else {
+                            break;
+                        };
+
+                        let Some(time_date_stamp) = read_u32(&bytes, descriptor_offset + 4) else {
+                            break;
+                        };
+
+                        let Some(forwarder_chain) = read_u32(&bytes, descriptor_offset + 8) else {
+                            break;
+                        };
+
+                        let Some(name_rva) = read_u32(&bytes, descriptor_offset + 12) else {
+                            break;
+                        };
+
+                        let Some(first_thunk) = read_u32(&bytes, descriptor_offset + 16) else {
+                            break;
+                        };
+
+                        // Null descriptor = done
+                        if original_first_thunk == 0
+                            && time_date_stamp == 0
+                            && forwarder_chain == 0
+                            && name_rva == 0
+                            && first_thunk == 0
+                        {
+                            break;
+                        }
+
+                        if let Some(name_offset) = rva_to_file_offset(name_rva, &pe_sections) {
+                            if let Some(dll_name) = read_c_string(&bytes, name_offset) {
+                                observations.push(Observation::new("PE Import DLL", dll_name));
+                            }
+                        }
+
+                        observations.push(Observation::new(
+                            "PE Import Original First Thunk",
+                            format!("0x{:08X}", original_first_thunk),
+                        ));
+
+                        observations.push(Observation::new(
+                            "PE Import First Thunk",
+                            format!("0x{:08X}", first_thunk),
+                        ));
+
+                        if let Some(thunk_offset) =
+                            rva_to_file_offset(original_first_thunk, &pe_sections)
+                        {
+                            let mut current_thunk = thunk_offset;
+
+                            loop {
+                                let Some(thunk_data) = read_u64(&bytes, current_thunk) else {
+                                    break;
+                                };
+
+                                if thunk_data == 0 {
+                                    break;
+                                }
+
+                                let hint_name_rva = thunk_data as u32;
+
+                                if let Some(hint_name_offset) =
+                                    rva_to_file_offset(hint_name_rva, &pe_sections)
+                                {
+                                    if let Some(function_name) =
+                                        read_c_string(&bytes, hint_name_offset + 2)
+                                    {
+                                        observations.push(Observation::new(
+                                            "PE Import Function",
+                                            function_name,
+                                        ));
+                                    }
+                                }
+
+                                current_thunk += 8;
+                            }
+                        }
+
+                        descriptor_offset += 20;
+                    }
+                }
+            }
+
+            observations.push(Observation::new(
+                format!("PE {} Directory Size", name),
+                format!("0x{:08X}", size),
+            ));
+        }
     }
 }
 
@@ -825,6 +1116,15 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
 // Helpers
 //===========================
 //
+
+//Hash
+
+//
+// --------------------------------------------------------
+// Binary Reader Helpers
+// --------------------------------------------------------
+//
+
 fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
     if offset + 2 > bytes.len() {
         return None;
@@ -863,6 +1163,14 @@ fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
     ]))
 }
 
+//
+// --------------------------------------------------------
+// PE Helpers
+// --------------------------------------------------------
+//
+
+//RVA
+
 fn rva_to_file_offset(rva: u32, sections: &[PeSection]) -> Option<usize> {
     for section in sections {
         let section_start = section.virtual_address;
@@ -891,4 +1199,33 @@ fn read_c_string(bytes: &[u8], offset: usize) -> Option<String> {
     }
 
     Some(String::from_utf8_lossy(&bytes[offset..end]).to_string())
+}
+
+// Resource Types
+
+fn resource_type_name(id: u16) -> &'static str {
+    match id {
+        1 => "Cursor",
+        2 => "Bitmap",
+        3 => "Icon",
+        4 => "Menu",
+        5 => "Dialog",
+        6 => "String Table",
+        7 => "Font Directory",
+        8 => "Font",
+        9 => "Accelerator",
+        10 => "RCData",
+        11 => "Message Table",
+        12 => "Group Cursor",
+        14 => "Group Icon",
+        16 => "Version",
+        17 => "DLInclude",
+        19 => "Plug and Play",
+        20 => "VXD",
+        21 => "Animated Cursor",
+        22 => "Animated Icon",
+        23 => "HTML",
+        24 => "Manifest",
+        _ => "Unknown",
+    }
 }
