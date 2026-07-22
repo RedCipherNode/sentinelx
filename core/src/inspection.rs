@@ -206,7 +206,6 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
     let Some(number_of_sections) = read_u16(&bytes, pe_offset + 6) else {
         return;
     };
-
     let Some(timestamp) = read_u32(&bytes, pe_offset + 8) else {
         return;
     };
@@ -218,7 +217,10 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
     // Observation COFF Header
 
     observations.push(Observation::new("PE Machine", machine));
-    observations.push(Observation::new("PE Sections", sections.to_string()));
+    observations.push(Observation::new(
+        "PE Sections",
+        number_of_sections.to_string(),
+    ));
     observations.push(Observation::new(
         "PE Timestamp",
         format_pe_timestamp(timestamp),
@@ -540,7 +542,7 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
     ));
     let mut pe_sections = Vec::new();
 
-    for index in 0..sections {
+    for index in 0..number_of_sections {
         let offset = section_table_offset + index as usize * 40;
 
         if offset + 40 > bytes.len() {
@@ -763,6 +765,162 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
         }
 
         // --------------------------------------------------------
+        // Import
+        // --------------------------------------------------------
+
+        if name == "Import" {
+            let Some(import_file_offset) = rva_to_file_offset(rva, &pe_sections) else {
+                continue;
+            };
+            let mut descriptor_offset = import_file_offset;
+            let mut descriptor_index = 1;
+
+            loop {
+                // ----------------------------------------------------
+                // IMAGE_IMPORT_DESCRIPTOR
+                // --------------------------------------------------
+
+                let Some(original_first_thunk) = read_u32(&bytes, descriptor_offset) else {
+                    break;
+                };
+
+                let Some(time_date_stamp) = read_u32(&bytes, descriptor_offset + 4) else {
+                    break;
+                };
+
+                let Some(forwarder_chain) = read_u32(&bytes, descriptor_offset + 8) else {
+                    break;
+                };
+
+                let Some(name_rva) = read_u32(&bytes, descriptor_offset + 12) else {
+                    break;
+                };
+
+                let Some(first_thunk) = read_u32(&bytes, descriptor_offset + 16) else {
+                    break;
+                };
+
+                if original_first_thunk == 0
+                    && time_date_stamp == 0
+                    && forwarder_chain == 0
+                    && name_rva == 0
+                    && first_thunk == 0
+                {
+                    break;
+                }
+
+                // DLL NAME
+
+                let Some(name_offset) = rva_to_file_offset(name_rva, &pe_sections) else {
+                    descriptor_offset += 20;
+                    descriptor_index += 1;
+                    continue;
+                };
+
+                let Some(dll_name) = read_c_string(&bytes, name_offset) else {
+                    descriptor_offset += 20;
+                    descriptor_index += 1;
+                    continue;
+                };
+
+                observations.push(Observation::new("Import DLL", dll_name.clone()));
+
+                // ------------------------------------------------
+                // IMAGE_THUNK_DATA
+                // ----------------------------------------------
+
+                let thunk_rva = if original_first_thunk != 0 {
+                    original_first_thunk
+                } else {
+                    first_thunk
+                };
+
+                let Some(mut thunk_offset) = rva_to_file_offset(thunk_rva, &pe_sections) else {
+                    descriptor_offset += 20;
+                    descriptor_index += 1;
+                    continue;
+                };
+
+                let thunk_size = if magic == 0x20B { 8 } else { 4 };
+
+                loop {
+                    let Some(thunk) = read_u32(&bytes, thunk_offset) else {
+                        break;
+                    };
+
+                    if thunk == 0 {
+                        break;
+                    }
+
+                    if (thunk & 0x80000000) != 0 {
+                        observations.push(Observation::new(
+                            "Import Ordinal",
+                            format!("{}", thunk & 0xFFFF),
+                        ));
+
+                        thunk_offset += thunk_size;
+                        continue;
+                    }
+
+                    let Some(import_name_offset) = rva_to_file_offset(thunk, &pe_sections) else {
+                        thunk_offset += thunk_size;
+                        continue;
+                    };
+
+                    let Some(function_name) = read_c_string(&bytes, import_name_offset + 2) else {
+                        thunk_offset += thunk_size;
+                        continue;
+                    };
+
+                    observations.push(Observation::new("Thunk", format!("0x{:08X}", thunk)));
+                    observations.push(Observation::new("Import Function", function_name));
+
+                    thunk_offset += thunk_size;
+                }
+
+                // ------------------------------------------------
+                // NEXT DESCRIPTOR
+                // ------------------------------------------------
+
+                descriptor_offset += 20;
+                descriptor_index += 1;
+
+                observations.push(Observation::new(
+                    format!("Import Descriptor {}", descriptor_index),
+                    "",
+                ));
+
+                observations.push(Observation::new(
+                    "OriginalFirstThunk",
+                    format!("0x{:08X}", original_first_thunk),
+                ));
+
+                observations.push(Observation::new(
+                    "TimeDateStamp",
+                    format!("0x{:08X}", time_date_stamp),
+                ));
+
+                observations.push(Observation::new(
+                    "ForwarderChain",
+                    format!("0x{:08X}", forwarder_chain),
+                ));
+
+                observations.push(Observation::new("Name RVA", format!("0x{:08X}", name_rva)));
+
+                observations.push(Observation::new(
+                    "Name File Offset",
+                    format!("0x{:08X}", name_offset),
+                ));
+
+                observations.push(Observation::new("Import DLL", dll_name));
+
+                observations.push(Observation::new(
+                    "FirstThunk",
+                    format!("0x{:08X}", first_thunk),
+                ));
+            }
+        }
+        // --------------------------------------------------------
         // Resource
         // -------------------------------------------------------
 
@@ -973,7 +1131,7 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
                                     };
 
                                     let Some(resource_file_offset) =
-                                        rva_to_file_offset(offset_to_data, &sections)
+                                        rva_to_file_offset(offset_to_data, &pe_sections)
                                     else {
                                         continue;
                                     };
