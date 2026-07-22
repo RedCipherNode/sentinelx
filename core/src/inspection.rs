@@ -765,6 +765,85 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
         }
 
         // --------------------------------------------------------
+        // Export
+        // --------------------------------------------------------
+
+        if name == "Export" {
+            if size == 0 {
+                continue;
+            }
+
+            let Some(export_file_offset) = rva_to_file_offset(rva, &pe_sections) else {
+                observations.push(Observation::new(
+                    "Export",
+                    "Failed to resolve export directory RVA",
+                ));
+                continue;
+            };
+
+            observations.push(Observation::new(
+                "Export Directory Offset",
+                format!("0x{:08X}", export_file_offset),
+            ));
+
+            let Some(name_rva) = read_u32(&bytes, export_file_offset + 12) else {
+                continue;
+            };
+
+            let Some(number_of_functions) = read_u32(&bytes, export_file_offset + 20) else {
+                continue;
+            };
+
+            let Some(number_of_names) = read_u32(&bytes, export_file_offset + 24) else {
+                continue;
+            };
+
+            let Some(address_of_names) = read_u32(&bytes, export_file_offset + 32) else {
+                continue;
+            };
+
+            observations.push(Observation::new(
+                "Export Functions",
+                number_of_functions.to_string(),
+            ));
+
+            observations.push(Observation::new(
+                "Export Names",
+                number_of_names.to_string(),
+            ));
+
+            // DLL Name
+
+            if let Some(name_offset) = rva_to_file_offset(name_rva, &pe_sections) {
+                if let Some(export_dll_name) = read_c_string(&bytes, name_offset) {
+                    observations.push(Observation::new("Export DLL", export_dll_name));
+                }
+            }
+
+            // Exported Function Names
+
+            if let Some(names_offset) = rva_to_file_offset(address_of_names, &pe_sections) {
+                let mut current = names_offset;
+
+                for _ in 0..number_of_names {
+                    let Some(function_name_rva) = read_u32(&bytes, current) else {
+                        break;
+                    };
+
+                    if let Some(function_name_offset) =
+                        rva_to_file_offset(function_name_rva, &pe_sections)
+                    {
+                        if let Some(function_name) = read_c_string(&bytes, function_name_offset) {
+                            observations.push(Observation::new("Export Function", function_name));
+                        }
+                    }
+
+                    current += 4;
+                }
+            }
+        }
+
+        // --------------------------------------------------------
         // Import
         // --------------------------------------------------------
 
@@ -1166,105 +1245,6 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
                     }
                 }
             }
-
-            if name == "Import" {
-                if let Some(import_offset) = rva_to_file_offset(rva, &pe_sections) {
-                    observations.push(Observation::new(
-                        "PE Import Directory Offset",
-                        format!("0x{:08X}", import_offset),
-                    ));
-
-                    let mut descriptor_offset = import_offset;
-
-                    loop {
-                        let Some(original_first_thunk) = read_u32(&bytes, descriptor_offset) else {
-                            break;
-                        };
-
-                        let Some(time_date_stamp) = read_u32(&bytes, descriptor_offset + 4) else {
-                            break;
-                        };
-
-                        let Some(forwarder_chain) = read_u32(&bytes, descriptor_offset + 8) else {
-                            break;
-                        };
-
-                        let Some(name_rva) = read_u32(&bytes, descriptor_offset + 12) else {
-                            break;
-                        };
-
-                        let Some(first_thunk) = read_u32(&bytes, descriptor_offset + 16) else {
-                            break;
-                        };
-
-                        // Null descriptor = done
-                        if original_first_thunk == 0
-                            && time_date_stamp == 0
-                            && forwarder_chain == 0
-                            && name_rva == 0
-                            && first_thunk == 0
-                        {
-                            break;
-                        }
-
-                        if let Some(name_offset) = rva_to_file_offset(name_rva, &pe_sections) {
-                            if let Some(dll_name) = read_c_string(&bytes, name_offset) {
-                                observations.push(Observation::new("PE Import DLL", dll_name));
-                            }
-                        }
-
-                        observations.push(Observation::new(
-                            "PE Import Original First Thunk",
-                            format!("0x{:08X}", original_first_thunk),
-                        ));
-
-                        observations.push(Observation::new(
-                            "PE Import First Thunk",
-                            format!("0x{:08X}", first_thunk),
-                        ));
-
-                        if let Some(thunk_offset) =
-                            rva_to_file_offset(original_first_thunk, &pe_sections)
-                        {
-                            let mut current_thunk = thunk_offset;
-
-                            loop {
-                                let Some(thunk_data) = read_u64(&bytes, current_thunk) else {
-                                    break;
-                                };
-
-                                if thunk_data == 0 {
-                                    break;
-                                }
-
-                                let hint_name_rva = thunk_data as u32;
-
-                                if let Some(hint_name_offset) =
-                                    rva_to_file_offset(hint_name_rva, &pe_sections)
-                                {
-                                    if let Some(function_name) =
-                                        read_c_string(&bytes, hint_name_offset + 2)
-                                    {
-                                        observations.push(Observation::new(
-                                            "PE Import Function",
-                                            function_name,
-                                        ));
-                                    }
-                                }
-
-                                current_thunk += 8;
-                            }
-                        }
-
-                        descriptor_offset += 20;
-                    }
-                }
-            }
-
-            observations.push(Observation::new(
-                format!("PE {} Directory Size", name),
-                format!("0x{:08X}", size),
-            ));
         }
     }
 }
