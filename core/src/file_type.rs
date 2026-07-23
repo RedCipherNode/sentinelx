@@ -26,7 +26,7 @@ impl FileType {
             Self::PDF => "pdf",
             Self::ZIP => "zip",
             Self::PNG => "png",
-            Self::JPEG => "jpg",
+            Self::JPEG => "jpeg",
             Self::GIF => "gif",
         }
     }
