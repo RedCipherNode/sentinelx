@@ -1249,13 +1249,57 @@ fn inspect_pe(path: &Path, observations: &mut Vec<Observation>) {
     }
 }
 
-//
-//==============================
-// Helpers
-//===========================
-//
+//=====================================
+// PDF (Portable Document Format)
+//=====================================
 
-//Hash
+fn inspect_pdf(target: &Target) {
+    //
+    // --------------------------------------------------------
+    // Read File
+    // --------------------------------------------------------
+    //
+
+    let bytes = match std::fs::read(&target.path) {
+        Ok(bytes) => bytes,
+
+        Err(error) => {
+            observation_error("PDF Read", format!("Failed to read file: {}", error));
+
+            return;
+        }
+    };
+
+    //
+    // --------------------------------------------------------
+    // Signature
+    // --------------------------------------------------------
+    //
+
+    if !bytes.starts_with(b"%PDF-") {
+        finding_warning("Invalid PDF", "Missing PDF signature");
+
+        return;
+    }
+
+    observation_info("PDF Signature", "Valid");
+
+    //
+    // --------------------------------------------------------
+    // Version
+    // --------------------------------------------------------
+    //
+
+    if let Some(version) = read_pdf_version(&bytes) {
+        observation_info("PDF Version", version);
+    }
+}
+
+//
+//=====================================================
+// Helpers
+//======================================================
+//
 
 //
 // --------------------------------------------------------
@@ -1366,4 +1410,30 @@ fn resource_type_name(id: u16) -> &'static str {
         24 => "Manifest",
         _ => "Unknown",
     }
+}
+
+//
+// --------------------------------------------------------
+// PDF Helpers
+// --------------------------------------------------------
+//
+
+fn read_pdf_version(bytes: &[u8]) -> Option<String> {
+    if !bytes.starts_with(b"%PDF-") {
+        return None;
+    }
+
+    let mut end = 5;
+
+    while end < bytes.len() {
+        let byte = bytes[end];
+
+        if byte == b'\r' || byte == b'\n' {
+            break;
+        }
+
+        end += 1;
+    }
+
+    Some(String::from_utf8_lossy(&bytes[5..end]).trim().to_string())
 }

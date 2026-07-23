@@ -1,8 +1,6 @@
-# Figure 1.1 — System Overview
+# Diagram
 
-### Shows the external interaction between the user, SentinelX, and the inspection result.
-
-
+## Figure 1.1 — System Overview
 
 ```mermaid
 flowchart LR
@@ -24,7 +22,7 @@ flowchart LR
     Report --> User
 ```
 
-# Figure 1.2 — High-Level Architecture
+## Figure 1.2 — High-Level Architecture
 ```mermaid
 flowchart LR
 
@@ -53,7 +51,7 @@ flowchart LR
 ```
 
 
-# Figure 1.3 — Low-Level Architecture (Master)
+## Figure 1.3 — Low-Level Architecture (Master)
 
 ```mermaid
 flowchart TB
@@ -138,6 +136,7 @@ InspectionOrchestrator --> DocumentInspector
 InspectionOrchestrator --> ArchiveInspector
 InspectionOrchestrator --> ImageInspector
 
+
 %% ===================================================================
 %% OBSERVATION
 %% ===================================================================
@@ -152,10 +151,11 @@ subgraph SG_Observation["Observation"]
 
 end
 
-PEInspector --> Observation
+
 DocumentInspector --> Observation
 ArchiveInspector --> Observation
 ImageInspector --> Observation
+PEDirectoryInspection --> Observation
 
 %% ===================================================================
 %% ANALYSIS
@@ -260,4 +260,83 @@ subgraph SG_Report["Report"]
 end
 
 Presenter --> InspectionReport
+```
+
+
+
+## Figure 2.1 — Inspection Architecture
+
+```mermaid
+flowchart LR
+
+    A[Inspection]
+        --> B[Inspection Orchestrator]
+
+    B --> C[Inspector]
+
+    C --> D[Observation]
+
+    C --> E[Discovered Target]
+```
+
+
+## Figure 2.2 — Inspection Routing
+
+```mermaid
+flowchart LR
+
+    A[Inspection Target]
+        --> B[Target Resolution]
+
+    B --> C[Inspector Selection]
+
+    C --> D[Inspector Dispatch]
+
+    D --> E[Inspector]
+```
+
+## Figure 2.3 — Inspection Target
+
+```mermaid
+flowchart LR
+
+    A[Root Target]
+
+    A --> B[Discovered Target]
+
+    A --> C[Discovered Target]
+
+    B --> D[Discovered Target]
+```
+
+## Figure 2.4 — Inspector Contract
+
+```mermaid
+flowchart TB
+
+    A[Inspector]
+
+    A --> B[Observation]
+
+    A --> C[Discovered Target]
+```
+
+## Figure 2.5 — PE Inspection
+
+```mermaid
+flowchart TB
+
+    A[PE Inspector]
+
+    A --> B[Header Inspection]
+
+    A --> C[Section Inspection]
+
+    A --> D[Directory Inspection]
+
+    A --> E[Memory Inspection]
+
+    A --> F[Security Inspection]
+
+    A --> G[Execution Inspection]
 ```
