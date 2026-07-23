@@ -24,6 +24,11 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
 
+
+//=====================================================
+// Public API
+//=====================================================
+
 pub fn inspect(target: Target) -> Assessment {
     let observations = inspect_target(target);
     let findings = analyze(&observations);
@@ -34,6 +39,10 @@ pub fn inspect(target: Target) -> Assessment {
         findings,
     }
 }
+
+//=====================================================
+// Main Pipeline
+//=====================================================
 
 fn inspect_target(target: Target) -> Vec<Observation> {
     match target {
@@ -47,115 +56,96 @@ fn inspect_target(target: Target) -> Vec<Observation> {
 fn inspect_file(path: &Path) -> Vec<Observation> {
     let mut observations = Vec::new();
 
-    observations.push(Observation::new("Target", path.display().to_string()));
+    //
+    // General Inspection
+    //
 
-    if let Some(ext) = path.extension() {
-        observations.push(Observation::new(
-            "Extension",
-            format!(".{}", ext.to_string_lossy()),
-        ));
-    }
+    inspect_metadata(path, &mut observations);
 
-    if let Ok(metadata) = fs::metadata(path) {
-        observations.push(Observation::new(
-            "Size",
-            format!("{} bytes", metadata.len()),
-        ));
-    }
+    let file_type = detect_file_type(path);
 
-    if let Some(file_type) = detect_file_type(path) {
-        observations.push(Observation::new("Detected Type", file_type.display()));
+    if let Some(file_type) = file_type {
+        observations.push(
+            Observation::new("Detected Type", file_type.display()),
+        );
+
+        inspect_format(path, file_type, &mut observations);
     }
 
     inspect_hashes(path, &mut observations);
 
-    dispatch(path, &mut observations);
-
     observations
 }
 
-fn dispatch(path: &Path, observations: &mut Vec<Observation>) {
-    if let Some(file_type) = detect_file_type(path) {
-        match file_type {
-            FileType::PE => inspect_pe(path, observations),
-
-            _ => {}
-        }
-    }
+fn inspect_directory(path: &Path) -> Vec<Observation> {
+    vec![
+        Observation::new("Target", path.display().to_string()),
+    ]
 }
 
-fn detect_file_type(path: &Path) -> Option<FileType> {
-    let mut file = File::open(path).ok()?;
-
-    let mut buffer = [0u8; 16];
-    let bytes_read = file.read(&mut buffer).ok()?;
-
-    let data = &buffer[..bytes_read];
-
-    if data.starts_with(b"MZ") {
-        return Some(FileType::PE);
-    }
-
-    if data.starts_with(b"%PDF") {
-        return Some(FileType::PDF);
-    }
-
-    if data.starts_with(b"PK\x03\x04") {
-        return Some(FileType::ZIP);
-    }
-
-    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Some(FileType::PNG);
-    }
-
-    if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        return Some(FileType::JPEG);
-    }
-
-    if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
-        return Some(FileType::GIF);
-    }
-
-    None
+fn inspect_url(url: &str) -> Vec<Observation> {
+    vec![
+        Observation::new("Target", url),
+    ]
 }
 
-//==================================
-//Hash
-//===============================
-
-fn inspect_hashes(path: &Path, observations: &mut Vec<Observation>) {
-    let Ok(bytes) = fs::read(path) else {
-        return;
-    };
-
-    //
-    // MD5
-    //
-
-    let md5 = md5::compute(&bytes);
-
-    observations.push(Observation::new("MD5", format!("{:x}", md5)));
-
-    //
-    // SHA-1
-    //
-
-    let mut sha1 = Sha1::new();
-
-    sha1.update(&bytes);
-
-    observations.push(Observation::new("SHA-1", format!("{:x}", sha1.finalize())));
-
-    //
-    // SHA-256
-    //
-
-    let mut sha256 = Sha256::new();
-
-    sha256.update(&bytes);
-
-    observations.push(Observation::new(
-        "SHA-256",
-        format!("{:x}", sha256.finalize()),
-    ));
+fn inspect_command(command: &str) -> Vec<Observation> {
+    vec![
+        Observation::new("Target", command),
+    ]
 }
+
+//=====================================================
+// Secondary Pipeline
+//=====================================================
+
+//
+// Reserved.
+//
+// This pipeline is executed when an inspector discovers
+// additional inspection targets during investigation.
+//
+// Examples:
+//
+// ZIP  -> extracted executable
+// PDF  -> embedded file
+// PDF  -> URI
+// DOCX -> embedded object
+// PNG  -> extracted payload
+//
+// Future:
+//
+// fn inspect_discovered_target(...)
+//
+// fn inspect_child_target(...)
+//
+
+//=====================================================
+// Orchestration Support
+//=====================================================
+
+//
+// --------------------------------------------------------
+// Identification
+// --------------------------------------------------------
+//
+
+fn detect_file_type(...)
+
+//
+// --------------------------------------------------------
+// Routing
+// --------------------------------------------------------
+//
+
+fn route_file(...)
+
+//
+// --------------------------------------------------------
+// General Inspection
+// --------------------------------------------------------
+//
+
+fn inspect_metadata(...)
+
+fn inspect_hashes(...)
