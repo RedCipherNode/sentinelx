@@ -24,39 +24,19 @@ use std::fs::{self, File};
 use std::io::Read;
 use std::path::Path;
 
-
 //=====================================================
 // Public API
 //=====================================================
 
-fn inspect_file(path: &Path) -> Vec<Observation> {
-    let mut observations = Vec::new();
+pub fn inspect(target: Target) -> Assessment {
+    let observations = inspect_target(target);
+    let findings = analyze(&observations);
 
-    //
-    // General Inspection
-    //
-
-    inspect_metadata(path, &mut observations);
-
-    let file_type = detect_file_type(path);
-
-    if let Some(file_type) = file_type {
-        observations.push(
-            Observation::new("Detected Type", file_type.display()),
-        );
+    Assessment {
+        summary: String::from("Inspection completed."),
+        observations,
+        findings,
     }
-
-    inspect_hashes(path, &mut observations);
-
-    //
-    // Dispatch
-    //
-
-    if let Some(file_type) = file_type {
-        dispatch_file(path, file_type, &mut observations);
-    }
-
-    observations
 }
 
 //=====================================================
@@ -75,55 +55,45 @@ fn inspect_target(target: Target) -> Vec<Observation> {
 fn inspect_file(path: &Path) -> Vec<Observation> {
     let mut observations = Vec::new();
 
-    //
-    // General Inspection
-    //
-
     inspect_metadata(path, &mut observations);
 
     let file_type = detect_file_type(path);
 
     if let Some(file_type) = file_type {
-        observations.push(
-            Observation::new("Detected Type", file_type.display()),
-        );
-
-        dispatch_file(path, file_type, &mut observations);
+        observations.push(Observation::new("Detected Type", file_type.display()));
     }
 
     inspect_hashes(path, &mut observations);
+
+    if let Some(file_type) = file_type {
+        dispatch_file(path, file_type, &mut observations);
+    }
 
     observations
 }
 
 fn inspect_directory(path: &Path) -> Vec<Observation> {
-    vec![
-        Observation::new("Target", path.display().to_string()),
-    ]
+    let mut observations = Vec::new();
+
+    observations.push(Observation::new("Target", path.display().to_string()));
+
+    observations
 }
 
 fn inspect_url(url: &str) -> Vec<Observation> {
-    vec![
-        Observation::new("Target", url),
-    ]
+    let mut observations = Vec::new();
+
+    observations.push(Observation::new("Target", url));
+
+    observations
 }
 
 fn inspect_command(command: &str) -> Vec<Observation> {
-    vec![
-        Observation::new("Target", command),
-    ]
-}
+    let mut observations = Vec::new();
 
-fn dispatch_file(
-    path: &Path,
-    file_type: FileType,
-    observations: &mut Vec<Observation>,
-) {
-    match file_type {
-        FileType::PE => inspect_pe(path, observations),
+    observations.push(Observation::new("Target", command));
 
-        _ => {}
-    }
+    observations
 }
 
 //=====================================================
@@ -161,15 +131,29 @@ fn dispatch_file(
 // --------------------------------------------------------
 //
 
-fn detect_file_type(...)
+fn detect_file_type(path: &Path) -> Option<FileType> {
+    let mut file = File::open(path).ok()?;
+
+    let mut header = [0u8; 32];
+
+    let bytes_read = file.read(&mut header).ok()?;
+
+    FileType::detect(&header[..bytes_read])
+}
 
 //
 // --------------------------------------------------------
-// Routing
+// Dispatching
 // --------------------------------------------------------
 //
 
-fn route_file(...)
+fn dispatch_file(path: &Path, file_type: FileType, observations: &mut Vec<Observation>) {
+    match file_type {
+        FileType::PE => inspect_pe(path, observations),
+
+        _ => {}
+    }
+}
 
 //
 // --------------------------------------------------------
@@ -177,6 +161,39 @@ fn route_file(...)
 // --------------------------------------------------------
 //
 
-fn inspect_metadata(...)
+fn inspect_metadata(path: &Path, observations: &mut Vec<Observation>) {
+    let Ok(metadata) = fs::metadata(path) else {
+        return;
+    };
 
-fn inspect_hashes(...)
+    observations.push(Observation::new("File Size", metadata.len().to_string()));
+
+    observations.push(Observation::new(
+        "Read Only",
+        metadata.permissions().readonly().to_string(),
+    ));
+}
+
+fn inspect_hashes(path: &Path, observations: &mut Vec<Observation>) {
+    let Ok(mut file) = File::open(path) else {
+        return;
+    };
+
+    let mut buffer = Vec::new();
+
+    if file.read_to_end(&mut buffer).is_err() {
+        return;
+    }
+
+    let md5 = format!("{:x}", md5::compute(&buffer));
+
+    let sha1 = format!("{:x}", Sha1::digest(&buffer));
+
+    let sha256 = format!("{:x}", Sha256::digest(&buffer));
+
+    observations.push(Observation::new("MD5", md5));
+
+    observations.push(Observation::new("SHA1", sha1));
+
+    observations.push(Observation::new("SHA256", sha256));
+}

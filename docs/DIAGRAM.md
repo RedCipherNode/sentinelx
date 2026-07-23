@@ -66,13 +66,30 @@ InspectionTarget["Inspection Target"]
 %% ROUTING
 %% ===================================================================
 
-subgraph SG_Routing["Routing"]
+subgraph SG_Orchestration["Inspection Orchestration"]
 
 InspectionOrchestrator["Inspection Orchestrator"]
+
+MetadataInspection["Metadata Inspection"]
+
+FileTypeDetection["File Type Detection"]
+
+HashInspection["Hash Inspection"]
+
+InspectorDispatch["Inspector Dispatch"]
+
+InspectionOrchestrator --> MetadataInspection
+
+MetadataInspection --> FileTypeDetection
+
+FileTypeDetection --> HashInspection
+
+HashInspection --> InspectorDispatch
 
 end
 
 InspectionTarget --> InspectionOrchestrator
+
 
 
 %% ===================================================================
@@ -131,10 +148,10 @@ subgraph SG_Inspection["Inspection"]
 
 end
 
-InspectionOrchestrator --> PEInspector
-InspectionOrchestrator --> DocumentInspector
-InspectionOrchestrator --> ArchiveInspector
-InspectionOrchestrator --> ImageInspector
+InspectorDispatch --> PEInspector
+InspectorDispatch --> DocumentInspector
+InspectorDispatch --> ArchiveInspector
+InspectorDispatch --> ImageInspector
 
 
 %% ===================================================================
@@ -272,11 +289,15 @@ flowchart LR
     A[Inspection]
         --> B[Inspection Orchestrator]
 
-    B --> C[Inspector]
+    B --> C[General Inspection]
 
-    C --> D[Observation]
+    C --> D[Inspector Dispatch]
 
-    C --> E[Discovered Target]
+    D --> E[Format Inspector]
+
+    E --> F[Observation]
+
+    E --> G[Discovered Target]
 ```
 
 
@@ -286,13 +307,14 @@ flowchart LR
 flowchart LR
 
     A[Inspection Target]
+
         --> B[Target Resolution]
 
-    B --> C[Inspector Selection]
+    B --> C[General Inspection]
 
     C --> D[Inspector Dispatch]
 
-    D --> E[Inspector]
+    D --> E[Format Inspector]
 ```
 
 ## Figure 2.3 — Inspection Target
