@@ -2,205 +2,328 @@
 
 ## Overview
 
-SentinelX is a CLI-first security inspection tool that analyzes untrusted digital content before it is opened, executed, or trusted.
+SentinelX is an evidence-driven security inspection engine that analyzes digital targets before they are opened, executed, or trusted.
 
-The architecture is designed around a single inspection pipeline that supports multiple target types while keeping analysis, assessment, and presentation separated.
+Rather than producing isolated detections, SentinelX performs a structured investigation that collects observations, derives findings, produces assessments, and presents explainable results.
+
+The architecture is organized into independent domains with clearly defined responsibilities, allowing new target types and inspection capabilities to be introduced without changing the overall inspection pipeline.
 
 ---
 
-## Design Principles
+# Design Principles
+
+SentinelX follows several fundamental architectural principles.
 
 - Never execute untrusted content.
-- Collect evidence before making assessments.
-- Explain every assessment with supporting evidence.
+- Collect evidence before producing assessments.
+- Every assessment must be supported by observable evidence.
+- Separate inspection from analysis and assessment.
 - Keep responsibilities isolated.
-- Keep dependencies one-directional.
-- Design for extensibility without changing the inspection pipeline.
+- Maintain one-directional dependencies.
+- Design for extensibility through composition rather than modification.
+- Present information at multiple levels of detail without changing the underlying investigation model.
 
 ---
 
-## High-Level Architecture
+# Architectural Domains
 
-```mermaid
-flowchart LR
+The inspection pipeline is composed of independent domains.
 
-    A[CLI Command]
-        --> B[Resolve Target]
-        --> C[Inspect]
-        --> D[Threat Analysis]
-        --> E[Present Results]
+```text
+Inspection Target
+
+↓
+
+Routing
+
+↓
+
+Inspection
+
+↓
+
+Observation
+
+↓
+
+Analysis
+
+↓
+
+Finding
+
+↓
+
+Assessment
+
+↓
+
+Presentation
+
+↓
+
+Report
 ```
 
+Each domain owns a single responsibility and communicates through well-defined artifacts.
+
 ---
 
-## Components
+# Domain Responsibilities
 
-### CLI
+## Routing
+
+Routing determines how an inspection target should be processed.
 
 Responsibilities
 
-- Parse command-line arguments.
-- Resolve user options.
-- Invoke the Core.
-- Display results.
-- Return exit codes.
+- Resolve inspection target type.
+- Select the appropriate inspector.
+- Dispatch inspection requests.
 
-Does not
-
-- Inspect targets.
-- Perform analysis.
-- Apply detection rules.
-- Calculate assessments.
+Routing never performs inspection.
 
 ---
 
-### Core
+## Inspection
+
+Inspection collects factual information directly from a target.
 
 Responsibilities
 
-- Resolve inspection targets.
-- Select inspection capabilities.
-- Execute inspections.
-- Collect observations.
-- Perform threat analysis.
-- Generate assessments.
-- Produce structured results.
+- Read target structure.
+- Extract metadata.
+- Inspect format-specific structures.
+- Produce observations.
+- Discover additional inspection targets when applicable.
 
-Does not
-
-- Parse CLI arguments.
-- Print terminal output.
-- Manage user interaction.
+Inspection never performs threat reasoning or risk scoring.
 
 ---
 
-### Presentation
+## Observation
+
+Observations represent raw evidence collected during inspection.
+
+Examples include
+
+- File metadata
+- PE headers
+- Archive structure
+- Document properties
+- Imported libraries
+- Embedded resources
+
+Observations contain facts only.
+
+Observations never express conclusions.
+
+---
+
+## Analysis
+
+Analysis evaluates observations to identify meaningful behaviors, relationships, and security-relevant characteristics.
 
 Responsibilities
 
-- Render CLI output.
-- Export JSON.
-- Export HTML.
-- Export Markdown.
+- Correlate observations.
+- Detect suspicious patterns.
+- Produce findings.
 
-Does not
-
-- Inspect targets.
-- Perform analysis.
-- Generate assessments.
+Analysis never assigns overall risk.
 
 ---
 
-## Inspection Flow
+## Finding
 
-```mermaid
-flowchart LR
+Findings describe meaningful conclusions derived from observations.
 
-    A[Target]
-        --> B[Inspection]
-        --> C[Observations]
-        --> D[Threat Analysis]
-        --> E[Assessment]
-        --> F[Presentation]
-```
+Examples include
 
-Each stage has a single responsibility.
+- Embedded executable detected
+- Packed executable
+- Suspicious import table
+- Obfuscated script
+- Potential downloader behavior
 
----
-
-## Inspection Targets
-
-The inspection pipeline is independent of target type.
-
-Supported targets include:
-
-- Files
-- Archives
-- Executables
-- Documents
-- URLs
-- Projects
-- Shell Commands
-- PowerShell Commands
-
-Additional targets may be introduced without changing the overall architecture.
-
----
-
-## Threat Analysis
-
-Threat analysis evaluates collected observations to identify suspicious behaviors, techniques, or attack patterns.
-
-Examples include:
-
-- Credential harvesting
-- Cookie theft
-- Session hijacking
-- Phishing
-- Remote code execution
-- Persistence
-- Obfuscation
-- Downloader behavior
-- Supply-chain attacks
-
-Threat analysis should always be supported by observable evidence.
+Every finding must be traceable back to supporting observations.
 
 ---
 
 ## Assessment
 
-Assessments summarize the overall security posture of the inspected target.
+Assessment evaluates findings to determine the overall security posture of the inspected target.
 
-Assessments should explain:
+Responsibilities
 
-- What was detected.
-- Why it is suspicious.
-- What data or resources are affected.
-- What the potential impact is.
+- Determine severity.
+- Explain impact.
+- Summarize security posture.
 
-Assessments must never exist without supporting observations.
+Assessments never exist without supporting findings.
 
 ---
 
-## Presentation Flow
+## Presentation
 
-```mermaid
-flowchart LR
+Presentation transforms investigation data into user-facing outputs.
 
-    A[Structured Result]
-        --> B[CLI]
-        --> C[JSON]
-        --> D[HTML]
-        --> E[Markdown]
+Presentation supports multiple presentation modes while using the same investigation model.
+
+Presentation never performs inspection, analysis, or assessment.
+
+---
+
+# Investigation Model
+
+Every inspection creates exactly one investigation.
+
+Each investigation has a single root target provided by the user.
+
+During inspection, additional targets may be discovered, such as archive entries, embedded files, or downloaded content.
+
+These discovered targets become part of the same investigation.
+
+This allows SentinelX to represent complex inspection hierarchies while preserving a single investigation context.
+
+---
+
+# Inspection Targets
+
+SentinelX is designed around inspection targets rather than file extensions.
+
+Examples include
+
+- Executables
+- Documents
+- Archives
+- Images
+- Directories
+- URLs
+- Projects
+- Scripts
+- Commands
+
+New target types can be introduced without changing the inspection pipeline.
+
+---
+
+# Evidence-Based Assessment
+
+SentinelX follows an evidence-first model.
+
+```text
+Observation
+
+↓
+
+Finding
+
+↓
+
+Assessment
 ```
 
-Presentation formats never perform inspection or threat analysis.
+Assessments are always explainable.
+
+Every conclusion can be traced back to supporting observations.
 
 ---
 
-## Dependency Rules
+# Presentation Modes
+
+SentinelX separates investigation from presentation.
+
+The same investigation model may be presented in multiple ways.
+
+## Summary
+
+Provides concise results intended for quick interpretation.
+
+## Detailed
+
+Provides investigation details suitable for analysts.
+
+## Full
+
+Provides complete investigation data intended for advanced users and reverse engineers.
+
+Presentation modes differ only in the amount of information displayed.
+
+No information is hidden or restricted.
+
+---
+
+# Dependency Rules
+
+Dependencies always flow downward.
 
 ```text
 CLI
-    │
-    ▼
+
+↓
+
 Core
-    │
-    ▼
+
+↓
+
 Presentation
+```
+
+Within the Core,
+
+```text
+Routing
+
+↓
+
+Inspection
+
+↓
+
+Observation
+
+↓
+
+Analysis
+
+↓
+
+Finding
+
+↓
+
+Assessment
 ```
 
 Rules
 
-- Dependencies flow in one direction.
-- Lower layers never depend on upper layers.
-- CLI never performs inspection.
-- Presentation never performs analysis.
-- Core remains independent from presentation.
+- Lower domains never depend on higher domains.
+- Presentation never performs inspection.
+- Assessment never performs inspection.
+- Analysis never performs assessment.
+- Inspection never performs analysis.
 
 ---
 
-## Project Structure
+# Extensibility
+
+SentinelX is designed to grow without changing the overall architecture.
+
+New
+
+- target types
+- inspectors
+- analyzers
+- findings
+- assessment strategies
+- presentation formats
+
+can be introduced while preserving the same investigation pipeline.
+
+---
+
+# Project Structure
 
 ```text
 sentinelx/
@@ -208,10 +331,10 @@ sentinelx/
 ├── cli/
 ├── core/
 ├── docs/
-├── tests/
+├── testdata/
 ├── Cargo.toml
 ├── README.md
 └── LICENSE
 ```
 
-Internal organization of `core` may evolve as complexity increases without changing the architecture described in this document.
+Internal implementation may evolve over time while preserving the architectural principles described in this document.
