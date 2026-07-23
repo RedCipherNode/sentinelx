@@ -29,15 +29,34 @@ use std::path::Path;
 // Public API
 //=====================================================
 
-pub fn inspect(target: Target) -> Assessment {
-    let observations = inspect_target(target);
-    let findings = analyze(&observations);
+fn inspect_file(path: &Path) -> Vec<Observation> {
+    let mut observations = Vec::new();
 
-    Assessment {
-        summary: String::from("Inspection completed."),
-        observations,
-        findings,
+    //
+    // General Inspection
+    //
+
+    inspect_metadata(path, &mut observations);
+
+    let file_type = detect_file_type(path);
+
+    if let Some(file_type) = file_type {
+        observations.push(
+            Observation::new("Detected Type", file_type.display()),
+        );
     }
+
+    inspect_hashes(path, &mut observations);
+
+    //
+    // Dispatch
+    //
+
+    if let Some(file_type) = file_type {
+        dispatch_file(path, file_type, &mut observations);
+    }
+
+    observations
 }
 
 //=====================================================
@@ -69,7 +88,7 @@ fn inspect_file(path: &Path) -> Vec<Observation> {
             Observation::new("Detected Type", file_type.display()),
         );
 
-        inspect_format(path, file_type, &mut observations);
+        dispatch_file(path, file_type, &mut observations);
     }
 
     inspect_hashes(path, &mut observations);
@@ -95,8 +114,20 @@ fn inspect_command(command: &str) -> Vec<Observation> {
     ]
 }
 
+fn dispatch_file(
+    path: &Path,
+    file_type: FileType,
+    observations: &mut Vec<Observation>,
+) {
+    match file_type {
+        FileType::PE => inspect_pe(path, observations),
+
+        _ => {}
+    }
+}
+
 //=====================================================
-// Secondary Pipeline
+// Discovery Pipeline
 //=====================================================
 
 //
